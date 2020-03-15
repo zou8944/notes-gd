@@ -2,7 +2,7 @@
 
 本仓库用于整理个人学习笔记，集合了从2019年下旬以来的有记录的学习。
 
-部分学习记录整理成文章，发布到[我的博客](http://www.zouguodong.top)了
+部分学习记录不在此处，已整理成文章，发布到[我的博客](http://www.zouguodong.top)了
 
 # 索引
 
@@ -17,16 +17,16 @@
 - [推荐系统实践](./notes/推荐系统实践学习笔记.md)
 - [分布式系统中的时间问题](./notes/分布式系统中的时间问题论文学习笔记.md)
 - [分布式理论](./notes/分布式理论学习.md)
-- [Web API 的设计与开发](./notes/Web API 的设计与开发.md)
+- [Web API 的设计与开发](./notes/WebAPI的设计与开发.md)
 
 ## 工具学习
 
 - [Linux](linux学习笔记.md)
-- [Kubernetes in action](./notes/Kubernetes in action学习笔记.md)
+- [Kubernetes in action](./notes/Kubernetesinaction学习笔记.md)
 - [Nginx学习笔记](./notes/Nginx学习笔记.md)
-- [Netty In Action](./notes/Netty In Action学习笔记.md)
-- [Vertx In Action](./notes/Vertx In Action学习笔记.md)
-- [阿里云函数计算fun工具 cheat sheet](./notes/阿里云函数计算fun工具 cheat sheet.md)
+- [Netty In Action](./notes/NettyInAction学习笔记.md)
+- [Vertx In Action](./notes/VertxInAction学习笔记.md)
+- [阿里云函数计算fun工具 cheat sheet](./notes/阿里云函数计算fun工具cheatsheet.md)
 
 ## 杂记
 
