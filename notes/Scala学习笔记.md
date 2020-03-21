@@ -40,12 +40,13 @@
   }
   ```
 
-
-
-
 # 《Scala编程》学习笔记
 
-## 基础介绍
+# 前言
+
+这本书是2010年第一次出版，因此需要选择性参考，其余的需要参考官方手册。
+
+# 基础介绍
 
 - 面向对象编程 + 函数式编程 + 静态 + JVM = Scala
 
@@ -814,5 +815,146 @@ x match {
 
 # 集合类型
 
+- Scala的集合类型的主要特质继承如下。所有集合类型都集成了Iterable特质。
+
+  ![image-20200321105910772](/home/floyd/PersonalCode/notes-gd/notes/Scala学习笔记/image-20200321105910772.png)
+
+- 集合对象可以通过elemetns方法产生Iterator
+- Iterator和Iterable看起来很像，但他们不是同一个层级的东西，Iterator扩展了AnyRef，它是用来执行枚举操作的特质，一个Iterator只能被使用一次。
+
+## Seq
+
+### List
+
+- 列表是一个递归定义的形式，即head+tail的递归结构，每一个tail又是head+tail的结构
+- 因此列表只能做取head和tail的操作，不能直接获取某个元素
+
+### ListBuffer
+
+- 是可变对象，可以高效地通过添加元素的方式构建列表
+- 使用toList可以转换成List对象，因此可以使用ListBuffer来动态构建List，再用toList()得到一个最终的LIst
+
+### Array
+
+- 数组是一组元素序列，可以使用index直接访问到元素
+
+### ArrayBuffer
+
+- 与数组类似，不过还允许我们在序列开始和结束的地方添加和删除元素
+
+### Queue
+
+- 即队列，分为可变和不可变的队列
+
+### Stack
+
+- 即栈，也分为可变和不可变两部分
+
+### RichString
+
+- 它是Seq[Char]
+- 由于Predef包含了从String到RichString的隐式转换，因此可以把任何字符串当做Seq[Char]
+
+## Set && Map
+
+在Predef中有如下定义，即默认导入的Set和Map等都是不可变的，要使用可变的，需要我们手动指明包
+
+```scala
+  /**  @group aliases */
+  type Map[K, +V] = immutable.Map[K, V]
+  /**  @group aliases */
+  type Set[A]     = immutable.Set[A]
+  /**  @group aliases */
+  val Map         = immutable.Map
+  /**  @group aliases */
+  val Set         = immutable.Set
+```
+
+- Set的常用操作如下
+
+  ![image-20200321113335658](/home/floyd/PersonalCode/notes-gd/notes/Scala学习笔记/image-20200321113335658.png)
+
+- Map的常用操作如下
+
+  ![image-20200321113707392](/home/floyd/PersonalCode/notes-gd/notes/Scala学习笔记/image-20200321113707392.png)
+
+  ![image-20200321113726197](/home/floyd/PersonalCode/notes-gd/notes/Scala学习笔记/image-20200321113726197.png)
+
+### SortedSet和SortedMap
+
+- 即有序集和有序Map
+- 他们的实现是TreeSet和TreeMap
+
+## SynchronizedSet和SynchronizedMap
+
+- 即线程安全的Set和Map
+- 它是一个特质，使用时需要通过混入它来实现自己的线程安全的Set或Map
+
+## 元组
+
+- 元组可以组合不同类型的对象，因此它不是Iterable的子类
+- 元组如果易于使用，但会在语义上给人冲突，直接将两个不同类型对象组合起来在语义上多数时候是说不通的，因此还是要慎重使用。
+
+# 有状态的对象
+
+- 一个对象有无状态，和它是否持有var类型的属性没有必然联系
+
+- 如果一个对象属性hour被定义为var，则其会产生名为hour的getter方法和名为hour_的setter方法
+
+  因此可以显式声明getter和setter，覆盖原本就有的内容
+
+# 参数化类型
+
+以如果A是B的子类型为前提，说明参数化类型之间的关系
+
+- 不变，Scala中默认的参数类型之间是无关的。
+
+  即：如果定义类型Clazz[A]，则Clazz[A]和Clazz[B]互不为父子类型
+
+- 协变，Clazz[+A]
+
+  即：Clazz[B]是Clazz[A]的子类型
+
+- 逆变，Clazz[-A]
+
+  即：Clazz[B]是Clazz[A]的符类型
+
+- 类型上界，Clazz[T <: A]
+
+  即：能够应用于Clazz的参数类型必须是A的子类
+
+- 类型下界，Clazz[T >: A]
+
+  即：能够应用于Clazz的参数类型必须是A的父类
+
+- 上下界和协变逆变可以组合起来
+
+# 抽象类型
+
+特质和抽象类可以包含一个抽象类型成员，实际类型可以由实现来确定，比如
+
+```scala
+trait Buffer {
+    type T
+    val element: T
+}
+
+class ConcreteBuffer extends Buffer {
+    type T = List[String]
+    val element = List("1", "2")
+}
+```
+
+## val懒加载
+
+在val前加上lazy修饰符，会在使用时才会去计算val的值
+
+```scala
+lazy val s = System.currentMillis()
+```
+
+## 枚举
 
 
+
+Scala的枚举并没有特殊的语法，而是继承scala.Enumeration类型即可。
