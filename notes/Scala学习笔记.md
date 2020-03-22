@@ -955,6 +955,123 @@ lazy val s = System.currentMillis()
 
 ## 枚举
 
-
-
 Scala的枚举并没有特殊的语法，而是继承scala.Enumeration类型即可。
+
+# 隐式转换和参数
+
+隐式转换，指的是，当一个方法声明为implicit时，在其对应参数类型运算出现编译错误时，编译器将自动应用该implicit方法，使得程序能够正常执行
+
+```scala
+class Test {
+
+  implicit def int2String(int: Int): String = int.toString
+
+  def test: Int = 12.length
+}
+```
+
+关于隐式转换，有如下几个点需要注意
+
+- 只有标记为implicit的定义才会被隐式转换
+- implicit定义只有在合法作用于内才会被调用
+- 如果作用域内有多个合法匹配的隐式方法，将由于歧义直接报错
+- 隐式转换只会调用一次，不会在隐式转换的基础上再次调用隐式转换，即不会嵌套调用
+- 隐式方法命名随意
+
+隐式转换将在如下三种情况下尝试
+
+- 转换为目标类型
+
+  当需要String时，但传入了一个int，此时会应用int转换String的隐式转换
+
+- 调用者的转换
+
+  当对int调用String的方法时，会应用int转换String的隐式转换
+
+- 参数列表转换
+
+  将implicit修饰的val隐式应用到声明为implicit的参数中
+
+  需要注意的是，参数列表要么不用隐式转换，要么全用隐式转换，不存在部分应用的情况。
+
+  隐式参数的类型必须被命名，不能是(Int) => String这样的过于通用的函数签名
+
+```scala
+class Test {
+
+  class Inner[String]
+    
+  implicit def int2String(int: Int): String = int.toString
+
+  // 调用者的转换
+  def test: Int = 12.length
+
+  def testTest(str: String): Unit = print(str)
+    
+  def testTest2(implicit str: String, int: Int): Unit = print(str)
+
+  def main(args: Array[String]): Unit = {
+    // 转换为目标类型
+    testTest(12)
+    // 转换为目标类型
+    new Inner[12]()
+    // 参数列表转换，s被隐式应用到testTest2中。
+    implicit val s: String = "helo"
+    implicit val i: Int = 2
+    testTest2
+  }
+
+}
+```
+
+调试隐式转换代码的方法
+
+- 不多的话，可以先显式调用，没有问题再写成隐式转换
+- 可以scalac编译成隐式调用之后的代码，再查看是否符合预期
+
+# 列表深入探索
+
+## List实现原理
+
+前面说过，scala中的List是递归的数据结构。
+
+在类型构成上，它只由List抽象类和::、Nil两个子类构成，所有的列表都表示成::+Nil的形式
+
+![image-20200322114519856](/home/floyd/PersonalCode/notes-gd/notes/Scala学习笔记/image-20200322114519856.png)
+
+```scala
+case object Nil extends List[Nothing] {
+    override def head: Nothing = throw new NoSuchElementException("")
+    override def tail: List[Nothing] = throw new NoSuchElementException("")
+    override def isEmpty = true
+}
+
+final case class ::[+A] (override val head: A, private[scala] var next: List[A]) extends List[A] {
+    override def headOption: Som[A] = head
+    override def tail: List[A] = next
+    override def isEmpty = false
+}
+```
+
+平时使用::和:::操作符创建列表，他的签名如下
+
+```scala
+def ::[B >: A](elem : B): List[B] = ::(elem, this)
+def :::[B >: A](prefix : List[B]): List[B] = prefix.head::prefix.tail:::this 
+// 由于是右关联的操作符，因此相当于this.:::(prefix.tail).::prefix.head
+```
+
+一个构建好的List应该如下
+
+![image-20200322115558255](/home/floyd/PersonalCode/notes-gd/notes/Scala学习笔记/image-20200322115558255.png)
+
+其余的所有平常使用的函数式方法，如map，都可以使用这个递归定义实现
+
+```scala
+def map[B](f : A=>B) : List[B] = f(this.head)::this.tail.map(f)
+```
+
+然而，上面这些方式都不是尾递归，意味着效率低下且存在栈溢出的风险。为了解决这个问题，在实现这些方式时，scala采用了效率优先的ListBuffer
+
+## ListBuffer
+
