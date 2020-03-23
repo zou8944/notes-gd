@@ -1075,3 +1075,32 @@ def map[B](f : A=>B) : List[B] = f(this.head)::this.tail.map(f)
 
 ## ListBuffer
 
+待添加
+
+
+
+# for表达式详解
+
+for表达式的yield会被解析成map、flatmap等高阶函数
+
+详细来说，只要被for迭代的对象包含如下四个高阶函数，for都会被转义，便可以完美支持for表达式
+
+- map
+- flatMap
+- filter
+- forEach
+
+实现上述四个高阶函数的部分，则可以部分支持for表达式
+
+举两个例子
+
+```scala
+for (x <- books ) yield x + 1
+转义为
+books.map(x => x + 1)
+
+for (book <- books if book.id > 20) book.name
+转义为
+books.filter(book=>book.id>20).map(book=>book.name)
+```
+
