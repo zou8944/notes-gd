@@ -1104,3 +1104,41 @@ for (book <- books if book.id > 20) book.name
 books.filter(book=>book.id>20).map(book=>book.name)
 ```
 
+# 抽取器
+
+抽取器就是具有名为unapply成员方法的对象，unapply方法的目的是为了匹配并分解值。用在模式匹配中
+
+```scala
+object Email {
+    unapply(str: String): Option[(String, String)] = {
+        val parts = str split "@"
+        if (parts.length == 2) Some(parts(0), parts(1)) else None
+    }
+}
+
+// 有了上面的定义，就可以将一个邮件字符串在匹配时结构成变量
+emailString match {
+    case Email(name, domain) => print(name, domain)
+    case None => print("Nothing")
+}
+```
+
+case匹配时，将会引发unapply调用。
+
+- apply和unapply成对出现，且逻辑对偶，但并非强制，推荐这样做
+
+- unapply返回值一般为类型为元组的Option，但也可以是另外的类型
+
+  - 单个元素时，为该元素类型的Opton
+  - 为Boolean时，不再需要Option，直接是Option
+
+- unapply的返回值可以是Option[Seq[T]]类型，此时结构的参数是变化的。
+
+  集合就是实现了变参类型的unapply才可以结构随意多个参数
+
+## 抽取器 VS case class
+
+case class也可以用在case匹配中，但有一个缺点是结构出来的参数就是构造函数的参数，相当于暴露了类的结构，这是它不如抽取器的一点。
+
+
+
