@@ -1140,5 +1140,49 @@ case匹配时，将会引发unapply调用。
 
 case class也可以用在case匹配中，但有一个缺点是结构出来的参数就是构造函数的参数，相当于暴露了类的结构，这是它不如抽取器的一点。
 
+# 注解
 
+## 元编程
+
+就是处理程序的程序。
+
+## 注解
+
+注解方式也是@注解类名
+
+- 应用位置
+
+  可应用于任何类的声明和定义上，包括val、var、def、class、object、trait、type
+
+  还可以应用于表达式
+
+- 常用注解
+
+  - @deprecated	废弃
+
+  - @volatile
+
+    告知编译器该变量将被多线程使用，相当于Java中的volatile修饰符
+
+  - @serializable
+
+    默认情况下，类是不可序列化的，增加该注解可使其可序列化
+
+  - @SerialVersionUID(1234)
+
+    为序列化增加版本号
+
+  - @transient
+
+    序列化时忽略该注解注解的字段
+
+  - @scala.reflect.BeanProperty
+
+    放在字段上，编译器自动生成get和set方法
+
+  - @unchecked
+
+    忽略检查
+
+# Actor和并发
 
