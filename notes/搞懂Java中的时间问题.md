@@ -95,11 +95,14 @@ API文档https://docs.oracle.com/javase/8/docs/api/java/time/package-summary.htm
 
 - ZoneId
 
-  
+  时区ID，是用来确定Instant和LocalDateTime之间的转换规则的，有两种ZoneID
 
-- ZoneOffet
+  1. 固定偏移量，相对于UTC时间，如东八区。对应子类ZoneOffset
+  2. 地理区域，如Europe/Paris，用于对应UTC时间某个偏移量的地区，对应子类ZoneRegion
 
-  
+  实际规则是由ZoneRules类描述的。
+
+  ZoneRules定义了每个时区的时区偏移规则。这些规则对时区的历史和未来转换建模，Zoneoffsettransition用于过去时间的转换；Zoneoffsettransitionrule基于算法对未来实现转换。
 
 - API上，java.time提供了丰富但统一的API，不同前缀代表不同意思
   - of - 静态工厂方法
@@ -137,6 +140,22 @@ Java time-scale对不同时间段的定义略有不同，每个时间段都基�
 
 - 1972-11-03至今，java time-scale和UTC一致，与UTC没有闰秒的时间相同，对于闰秒的天，闰秒被平均分配在一天的最后1000秒中，以保证每天看起来还是86400秒。即意味着这天的最后1000秒，java的每一秒都比普通的时间快或慢1ms
 - 1972-11-03之前，UTC时间尚未提出，世界协商时间为UT1，相当于格林威治上的太阳时，由于没有闰秒的说法，java的time-sclae和世界协商时间一致。
+
+## 时区ID
+
+时区ID在整个系统中是唯一的，总共有三种时区ID
+
+- 最简单的时区ID，以+或-开头。
+
+- 带有前缀的和偏移量后缀的时区ID。如GMT+2、UTC+01:00，合法的前缀有GMT、UTC、UT。由于它有固定偏移量，因此可以调用ZoneId.normalized()标准化成一个ZoneOffset
+
+- 基于地理区域的ID。必须由两个以上字符组成，且不能是UTC、GMT、UT、+、- 。基于地理区域的ID的转换规则是被定义在配置中的，由ZoneRulesProvider实现。
+
+  翻看ZoneRulesProvider的手册，发现对时区的配置可以自定义，按照指定的规则来即可。默认情况下，它使用了位于java home的lib文件夹下tzdb.dat文件中定义的数据加载规则。我们可以覆盖这个操作，通过设置系统变量java.time.zone.DefaultZoneRulesProvider
+
+时区由政府部门指定，且修改频繁。有好几个组织做这件事。Java默认使用IANA Time Zone Database (TZDB)的规则，其它组织包括IATA和微软。每个组织的区域ID都不一样，我们遵循默认的TZDB就好。
+
+
 
 # joda time
 
