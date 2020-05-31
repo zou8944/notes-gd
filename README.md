@@ -28,6 +28,7 @@
 - [Vertx In Action](./notes/VertxInAction学习笔记.md)
 - [阿里云函数计算fun工具 cheat sheet](./notes/阿里云函数计算fun工具cheatsheet.md)
 - [Arrow](./notes/Arrow.md)
+- [Gradle](./notes/Gradle学习笔记.md)
 
 ## 杂记
 
