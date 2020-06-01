@@ -11,6 +11,10 @@
 - [Scala编程](./notes/Scala学习笔记.md)
 - [RxJava](./notes/RxJava学习笔记.md)
 
+## 数据库
+
+- [Postgresql的监听和通知](./notes/Postgresql的LISTEN&NOTIFY.md)
+
 ## 理论学习
 
 - [DDIA（设计数据密集型应用）](./notes/DDIA学习笔记.md)
