@@ -345,6 +345,38 @@ Gradle支持下面三种不同类型的仓库：
 
 ![img](https://lippiouyang.gitbooks.io/gradle-in-action-cn/content/images/5-8.png)
 
+# 第一次搭建gradle kotlin环境
+
+搭建步骤
+
+1. 使用IDEA选择gradle，kotlin生成新的项目。
+2. 等待下载gradle完成
+
+问题：
+
+1. 出现找不到org.jetbrains.kotlin.jvm插件的问题
+
+   在settings.gradle中增加插件管理依赖
+
+   ```gradle
+   // 放在文件最开头
+   pluginManagement {
+       repositories {
+           mavenCentral()
+           gradlePluginPortal()
+       }
+   }
+   ```
+
+2. 没有基本的项目目录
+
+   自己创建folder，IDEA也会提示创建如下几个文件夹的快捷方式
+
+   - src/main/kotlin
+   - src/main/resources
+   - src/test/kotlin
+   - src/test/resources
+
 # 问题
 
 Maven插件和Gradle插件可以互用吗？
