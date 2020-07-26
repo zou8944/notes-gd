@@ -14,6 +14,8 @@
 ## 数据库
 
 - [Postgresql的监听和通知](./notes/Postgresql的LISTEN&NOTIFY.md)
+- [为什么我们使用PostgreSQL](./notes/为什么我们使用PostgreSQL.md)
+- [Postgresql explain 特辑](./notes/Postgresql explain 特辑.md)
 
 ## 理论学习
 
@@ -33,10 +35,13 @@
 - [阿里云函数计算fun工具 cheat sheet](./notes/阿里云函数计算fun工具cheatsheet.md)
 - [Arrow](./notes/Arrow.md)
 - [Gradle](./notes/Gradle学习笔记.md)
+- [Redis开发与运维](./notes/Redis开发与运维学习笔记.md)
+- [中间件实战](./notes/中间件实战.md)
+- [Spring Cloud](./notes/Spring Cloud学习笔记.md)
 
 ## 杂记
 
 - [如果有一个自己的服务器怎样才能充分利用起来呢](./notes/如果有一个自己的服务器怎样才能充分利用起来呢.md)
 - [Django从零搭建](./notes/使用Django从零搭建一个小型站点.md)
-
 - [搞懂Java中的时间问题](./notes/搞懂Java中的时间问题.md)
+- [在深圳骑车上班是什么体验](./notes/在深圳骑车上班.md)

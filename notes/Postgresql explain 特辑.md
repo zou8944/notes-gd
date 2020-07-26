@@ -116,7 +116,65 @@ order by notification.update_time desc, notification.id desc;
 
 # PostgreSQL 技术内幕 - 查询优化器深度探索
 
-在写完本片博文后，需要的时候再看。因为它太长了。
+我在想，趁着31号之前把本书看完，然后写出本篇博客
+
+**通用表达式**
+
+通用表达式即WITH语句中的表达式。即CTE
+
+**递归通用表达式**
+
+```sql
+with recursive inc(val) as
+    (
+        select 1
+        union all
+        select inc.val + 1
+        from inc
+        where inc.val < 10
+    )
+select * from inc;
+```
+
+输出
+
+```sql
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+```
+
+explain
+
+```bash
+CTE Scan on inc  (cost=2.95..3.57 rows=31 width=4)
+  CTE inc
+    ->  Recursive Union  (cost=0.00..2.95 rows=31 width=4)
+          ->  Result  (cost=0.00..0.01 rows=1 width=4)
+          ->  WorkTable Scan on inc inc_1  (cost=0.00..0.23 rows=3 width=4)
+                Filter: (val < 10)
+```
+
+**Semi-Join和Anti-Semi-Join是什么**
+
+查询提升中说到，子查询提升后会变为Semi-Join和Anti-Semi-Join，它们是什么意思呢？
+
+**Materialize物化，是物化到内存还是磁盘上呢**
+
+**pg_class表是干啥用的**
+
+**laterval特性是什么**
+
+
+
+
 
 ## 问题积累
 
