@@ -16,6 +16,7 @@
 - [Postgresql的监听和通知](./notes/Postgresql的LISTEN&NOTIFY.md)
 - [为什么我们使用PostgreSQL](./notes/为什么我们使用PostgreSQL.md)
 - [Postgresql explain 特辑](./notes/Postgresql explain 特辑.md)
+- [Postgresql - 看懂explain - blog](./notes/PostgreSQL优化查询原理.md)
 
 ## 理论学习
 
