@@ -9,3 +9,4 @@ set(GOODS.ADDITIONAL_INFO, DSL.field("COALESCE(additional_info, '{}')::jsonb || 
 - JOOQ的DSL.field(sql段, 列类型, 绑定值)；重点在绑定值，有了绑定值就可以使用bindValues获取到对应的参数
 - 绑定值的类型一定要是JSONB类型，否则会报错，排查半天也不一定知道是为什么
 - COALESCE()一定要，如果初始additional_info为null，则两个jsonb结合的结果也会是null。
+
