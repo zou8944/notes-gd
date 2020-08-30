@@ -80,11 +80,29 @@ CircuitBreakerBuilder
 
 # Zeko-SQL-Builder是如何做的
 
+**如何查询数据**
 
+自己抽象了一系列类，核心是Query类，该类包含了属性（代表SQL的各个不同的部分，如select的字段值，from的表名等），再通过table()，from()等方法设置对应的属性值。最后调用compile将各部分的字段组合起来，得到最终的SQL。
+
+优点：实现简单，原理简单，相对于直接写SQL来说，规避了裸写SQL的语法错误
+
+缺点：类型不安全，无法验证各字段类型
+
+**如何执行SQL**
+
+使用DBSession封装了底层client的实现方式，只暴露SQL、参数、结果，其中，结果是被处理成Map的
 
 # Zeko-Data-Mapper是如何做的
 
+核心类是DataMapper和MapperConfig
 
+**DataMapper**
+
+定义了mapStruct()方法，接受表格字段的映射规则，和SQL-Builder查询的结果。得到根据映射规则的最终处理结果。
+
+**MapperConfig**
+
+定义了表格的字段映射规则。
 
 # Koin做依赖注入的原理是什么
 
