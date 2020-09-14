@@ -130,15 +130,116 @@ public Thread newThread(Runnable runnable) {
 
 
 
-acceptorEventLoopGroup的作用是什么？
+#### acceptorEventLoopGroup的作用是什么？
 
+```java
+// 通过追踪调用链可以来到这里：
+// io.vertx.core.http.impl.HttpServerImpl#listen(...)
+ServerBootstrap bootstrap = new ServerBootstrap();
+bootstrap.group(vertx.getAcceptorEventLoopGroup(), availableWorkers);
 
+// Bootstrap是Netty的概念。而acceptorEventLoopGroup也只是一个EventLoopGroup，从中可以看出它只是一个用于Http服务的EventLoop组，用于监听请求。
+```
 
-internalBlockingPool的作用是什么？
+#### internalBlockingPool的作用是什么？
 
+```java
+// 创建时有如下语句，可以看到它只是创建了一个固定大小的线程池。
+ExecutorService internalBlockingExec = Executors.newFixedThreadPool(options.getInternalBlockingPoolSize(),
+        new VertxThreadFactory("vert.x-internal-blocking-", checker, true, options.getMaxWorkerExecuteTime(), options.getMaxWorkerExecuteTimeUnit()));
+    PoolMetrics internalBlockingPoolMetrics = metrics != null ? metrics.createPoolMetrics("worker", "vert.x-internal-blocking", options.getInternalBlockingPoolSize()) : null;
+    internalBlockingPool = new WorkerPool(internalBlockingExec, internalBlockingPoolMetrics);
 
+// 创建后的internalBlockingPool是在创建EventLoopContext时一起传入的，传入后它成了context的成员
+@Override
+public EventLoopContext createEventLoopContext(String deploymentID, WorkerPool workerPool, JsonObject config, ClassLoader tccl) {
+    return new EventLoopContext(this, internalBlockingPool, workerPool != null ? workerPool : this.workerPool, deploymentID, config, tccl);
+}
+// 跟踪它来到io.vertx.core.impl.ContextImpl#executeBlockingInternal。
+@Override
+public <T> void executeBlockingInternal(Handler<Promise<T>> action, Handler<AsyncResult<T>> resultHandler) {
+    executeBlocking(action, resultHandler, internalBlockingPool.executor(), internalOrderedTasks, internalBlockingPool.metrics());
+}
+// 来到最终使用它的地方。可以看到它其实就是在internalBlockingPool线程池提交了一个任务，该任务执行了传入的阻塞操作，并返回结果。注意结果是在原本的Context上运行runOnContext执行的。意味着executeBlocking的过程逻辑执行和结果逻辑执行不在一个线程。后者在调用它的EventLoop中执行。
+<T> void executeBlocking(Handler<Promise<T>> blockingCodeHandler,
+                         Handler<AsyncResult<T>> resultHandler,
+                         Executor exec, TaskQueue queue, PoolMetrics metrics) {
+    Object queueMetric = metrics != null ? metrics.submitted() : null;
+    try {
+        Runnable command = () -> {
+            VertxThread current = (VertxThread) Thread.currentThread();
+            Object execMetric = null;
+            if (metrics != null) {
+                execMetric = metrics.begin(queueMetric);
+            }
+            if (!DISABLE_TIMINGS) {
+                current.executeStart();
+            }
+            Promise<T> promise = Promise.promise();
+            try {
+                ContextImpl.setContext(this);
+                blockingCodeHandler.handle(promise);
+            } catch (Throwable e) {
+                promise.tryFail(e);
+            } finally {
+                if (!DISABLE_TIMINGS) {
+                    current.executeEnd();
+                }
+            }
+            Future<T> res = promise.future();
+            if (metrics != null) {
+                metrics.end(execMetric, res.succeeded());
+            }
+            res.onComplete(ar -> {
+                if (resultHandler != null) {
+                    runOnContext(v -> resultHandler.handle(ar));
+                } else if (ar.failed()) {
+                    reportException(ar.cause());
+                }
+            });
+        };
+        if (queue != null) {
+            queue.execute(command, exec);
+        } else {
+            exec.execute(command);
+        }
+    } catch (RejectedExecutionException e) {
+        // Pool is already shut down
+        if (metrics != null) {
+            metrics.rejected(queueMetric);
+        }
+        throw e;
+    }
+}
+```
 
-DeploymentManager是如何工作的？
+上面的代码还有一个重点，注意到`current.executeStart()`和`current.executeEnd()`，分别是对VertxThread的execStart计时。
+
+```java
+// 注意这里使用的是System.nanoTime()，因为System.currentMillis()可能在某些系统实现下不准。
+public final void executeStart() {
+    execStart = System.nanoTime();
+}
+```
+
+这里还有一个需要注意的地方，即区分executeBlocking和executeBlockingInternal两个方法，前者是在WorkerPool中执行逻辑，后者是在internalBlockingPool中执行逻辑
+
+```java
+// 执行器传入的是internalBlockingPool.executor()
+@Override
+public <T> void executeBlockingInternal(Handler<Promise<T>> action, Handler<AsyncResult<T>> resultHandler) {
+    executeBlocking(action, resultHandler, internalBlockingPool.executor(), internalOrderedTasks, internalBlockingPool.metrics());
+}
+// 执行器传入的是workerPool.executor()
+@Override
+public <T> void executeBlocking(Handler<Promise<T>> blockingCodeHandler, boolean ordered, Handler<AsyncResult<T>> resultHandler) {
+    executeBlocking(blockingCodeHandler, resultHandler, workerPool.executor(), ordered ? orderedTasks : null, workerPool.metrics());
+}
+```
+
+查看vertx.executeBlocking()代码，它其实就是context.executeBlocking()的封装，因此它是运行在workPool中的
+
+#### DeploymentManager是如何工作的？
 
 
 
@@ -150,9 +251,83 @@ EventBus本地版和集群版是如何工作的？
 
 
 
-SharedData的工作原理如何？
+#### SharedData的工作原理如何？
 
+所有关于共享数据的内容都在io.vertx.core.shareddata包下，核心类是SharedDataImpl。这一部分可是有些门道的。
 
+提供如下三种数据结构
+
+- io.vertx.core.shareddata.impl.LocalAsyncLocks
+
+  异步排他锁，在集群内部有效的锁。其实现的思路如下
+
+  - 维护一个ConcurrentMap，存储锁名和等待该锁的Handler列表
+  - 每次新来一个获取锁的请求，向等待列表中加入。并启动定时器开始计算超时，超时后直接回调锁等待超时。
+
+  至此加入等待列表的逻辑完成。然后是锁流转逻辑。采用被动的逻辑，非常节省复杂度。
+
+  - 当等待列表为空时，来一个请求就将锁给它；列表不为空时，仅加入等待列表，不做尝试获取锁的操作。
+  - 当一个锁被释放时，再主动将锁给等待列表的下一个请求。这样几乎从来不会出现竞争的情况。
+
+- io.vertx.core.shareddata.impl.AsynchronousCounter
+
+  计数器，增减都是原子操作
+
+- io.vertx.core.shareddata.impl.LocalMapImpl
+
+  本地Map，用于单个实例中共享数据。仅是对ConcurrentMap的包装，没有其它特别之处。他的所有操作都是同步的。
+
+- io.vertx.core.shareddata.impl.LocalAsyncMapImpl
+
+  异步Map，同样是对ConcurrentMap的包装。不同之处在于其value是Holder类，它封装了TTL，实现原理是调用vertx.setTimer设置一个TTL长度的定时器，过期移除。
+
+  ```java
+  @Override
+  public void put(K k, V v, long timeout, Handler<AsyncResult<Void>> completionHandler) {
+      long timestamp = System.nanoTime();
+      long timerId = vertx.setTimer(timeout, l -> removeIfExpired(k));
+      Holder<V> previous = map.put(k, new Holder<>(v, timerId, timeout, timestamp));
+      if (previous != null && previous.expires()) {
+          vertx.cancelTimer(previous.timerId);
+      }
+      completionHandler.handle(Future.succeededFuture());
+  }
+  ```
+
+  可能有顾虑设置太多定时器不好，但vertx其实是将定时任务加入eventLoop线程去执行了，因此并不会增加成本
+
+  ```java
+  public long setTimer(long delay, Handler<Long> handler) {
+      return scheduleTimeout(getOrCreateContext(), handler, delay, false);
+  }
+  private long scheduleTimeout(ContextImpl context, Handler<Long> handler, long delay, boolean periodic) {
+      if (delay < 1) {
+          throw new IllegalArgumentException("Cannot schedule a timer with delay < 1 ms");
+      }
+      long timerId = timeoutCounter.getAndIncrement();
+      InternalTimerHandler task = new InternalTimerHandler(timerId, handler, periodic, delay, context);
+      timeouts.put(timerId, task);
+      context.addCloseHook(task);
+      return timerId;
+  }
+  InternalTimerHandler(long timerID, Handler<Long> runnable, boolean periodic, long delay, ContextImpl context) {
+      this.context = context;
+      this.timerID = timerID;
+      this.handler = runnable;
+      this.periodic = periodic;
+      EventLoop el = context.nettyEventLoop();
+      if (periodic) {
+          future = el.scheduleAtFixedRate(this, delay, delay, TimeUnit.MILLISECONDS);
+      } else {
+          future = el.schedule(this, delay, TimeUnit.MILLISECONDS);
+      }
+      if (metrics != null) {
+          metrics.timerCreated(timerID);
+      }
+  }
+  ```
+
+  
 
 #### vertx.eventBus().send("", "")干了什么？
 
