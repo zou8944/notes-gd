@@ -752,3 +752,466 @@ public Context context() {
 }
 ```
 
+## 集群工作原理
+
+集群SPI接口
+
+<img src="D:\WorkSpace\notes-gd\notes\Vertx源码解读（草稿）.assets\image-20200920120549143.png" alt="image-20200920120549143" style="zoom:80%;" />
+
+- AsyncMultiMap： 用于集群间数据共享。共享的保证机制由具体集群实现决定
+- ChoosableIterable：能够跨集群的迭代器
+- ClusterManager：集群管理器，负责维护节点
+- NodeListener：节点监听器，监听节点的增删。
+
+### Vertx.clusteredVertx()
+
+```java
+// 与Vertx.vertx()相比，都会先实例化VertxImpl类。不同的是这次集群选项默认选中。且创建后会将vertx加入到集群中。
+static void clusteredVertx(VertxOptions options, Transport transport, Handler<AsyncResult<Vertx>> resultHandler) {
+    VertxImpl vertx = new VertxImpl(options, transport);
+    vertx.joinCluster(options, resultHandler);
+}
+```
+
+而在VertxImpl的实例化中，最大的区别是clusterManager有被赋值；eventBus被实例化为ClusteredEventBus类
+
+```java
+if (options.getEventBusOptions().isClustered()) {
+    this.clusterManager = getClusterManager(options);
+    this.eventBus = new ClusteredEventBus(this, options, clusterManager);
+} else {
+    this.clusterManager = null;
+    this.eventBus = new EventBusImpl(this);
+}
+```
+
+**来看getClusterManager方法**：查找用户自定义的集群管理器类；没有则到类路径中寻找ClusterManagerFactory
+
+```java
+private ClusterManager getClusterManager(VertxOptions options) {
+    ClusterManager mgr = options.getClusterManager();
+    if (mgr == null) {
+        String clusterManagerClassName = System.getProperty("vertx.cluster.managerClass");
+        if (clusterManagerClassName != null) {
+            // We allow specify a sys prop for the cluster manager factory which overrides ServiceLoader
+            try {
+                Class<?> clazz = Class.forName(clusterManagerClassName);
+                mgr = (ClusterManager) clazz.newInstance();
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to instantiate " + clusterManagerClassName, e);
+            }
+        } else {
+            // 这里是关键，ClusterManager只是一个SPI，具体的集群管理器实现需要如Hystrix之类的框架给与。
+            mgr = ServiceHelper.loadFactoryOrNull(ClusterManager.class);
+            if (mgr == null) {
+                throw new IllegalStateException("No ClusterManagerFactory instances found on classpath");
+            }
+        }
+    }
+    return mgr;
+}
+```
+
+从上面可以看出，我们指定集群管理器的方法有三种
+
+- 自己new好集群管理器类，然后传给VertxOptions配置
+- 通过系统属性vertx.cluster.managerClass指定类名
+- 通过在类路径中引入ClusterManagerFactory相关的库
+
+**再来看ClusteredEventBus构造方法**
+
+```java
+// 首先ClusteredEventBus是EventBusImpl的子类
+public class ClusteredEventBus extends EventBusImpl {
+    // 总体而言多了下面这么多属性
+    // 集群管理器
+    private final ClusterManager clusterManager;
+    // 维护集群内其它节点ID和连接的Map
+    private final ConcurrentMap<ServerID, ConnectionHolder> connections = new ConcurrentHashMap<>();
+    // 用于发送消息的上下文
+    private final Context sendNoContext;
+
+    // EventBus选项
+    private EventBusOptions options;
+    // 当前节点的副本节点信息：用于高可用
+    private AsyncMultiMap<String, ClusterNodeInfo> subs;
+    // 副本节点，通过上面的subs可以查到节点信息
+    private Set<String> ownSubs = new ConcurrentHashSet<>();
+    // 当前节点的ID
+    private ServerID serverID;
+    // 当前节点的集群信息
+    private ClusterNodeInfo nodeInfo;
+    // 维护一个网络服务，用户接收其它节点的请求
+    private NetServer server;
+    
+    public ClusteredEventBus(VertxInternal vertx,
+                           VertxOptions options,
+                           ClusterManager clusterManager) {
+    super(vertx);
+    this.options = options.getEventBusOptions();
+    this.clusterManager = clusterManager;
+    this.sendNoContext = vertx.getOrCreateContext();
+  }
+}
+```
+
+**最后我们康康joinCluster方法**
+
+结合下面对vertx-zookeeper的分析，joinCluster方法就是在zookeeper集群中创建了一个节点。
+
+```java
+// 调用的关键，在于clusterManager.join方法。暂时忽略对HA的分析。
+private void joinCluster(VertxOptions options, Handler<AsyncResult<Vertx>> resultHandler) {
+    clusterManager.setVertx(this);
+    clusterManager.join(ar1 -> {
+        if (ar1.succeeded()) {
+            createHaManager(options, resultHandler);
+        } else {
+            log.error("Failed to join cluster", ar1.cause());
+            close(ar2 -> resultHandler.handle(Future.failedFuture(ar1.cause())));
+        }
+    });
+}
+```
+
+### 展示一个ClusterManager的实现（Zookeeper）
+
+引入vertx-zookeeper后，可以发现它的实现其实没啥，核心类就一个ZookeeperClusterManager
+
+<img src="D:\WorkSpace\notes-gd\notes\Vertx源码解读（草稿）.assets\image-20200920112850113.png" alt="image-20200920112850113" style="zoom:50%; align:left;" />
+
+我们主要关注两个方面：
+
+- vertx在vertx-zookeeper中干了啥
+
+  纵观整个ZookeeperClusterManager类，对它的使用仅仅是调用了vertx.executeBlocking()方法去执行zookeeper实际的方法
+
+- join方法干了啥
+
+  如下，该方法大部分都是zookeeper创建curator的逻辑，忽略后仅剩下一个addLocalNodeID()方法的调用。该方法创建了一个Zookeeper节点，不做深究。
+
+  ```java
+  @Override
+  public synchronized void join(Handler<AsyncResult<Void>> resultHandler) {
+      vertx.executeBlocking(future -> {
+          if (!active) {
+              active = true;
+  
+              lockReleaseExec = Executors.newCachedThreadPool(r -> new Thread(r, "vertx-zookeeper-service-release-lock-thread"));
+  
+              //The curator instance has been passed using the constructor.
+              if (customCuratorCluster) {
+                  try {
+                      addLocalNodeID();
+                      future.complete();
+                  } catch (VertxException e) {
+                      future.fail(e);
+                  }
+                  return;
+              }
+  
+              if (curator == null) {
+                  retryPolicy = new ExponentialBackoffRetry(
+                      conf.getJsonObject("retry", new JsonObject()).getInteger("initialSleepTime", 1000),
+                      conf.getJsonObject("retry", new JsonObject()).getInteger("maxTimes", 5),
+                      conf.getJsonObject("retry", new JsonObject()).getInteger("intervalTimes", 10000));
+  
+                  // Read the zookeeper hosts from a system variable
+                  String hosts = System.getProperty("vertx.zookeeper.hosts");
+                  if (hosts == null) {
+                      hosts = conf.getString("zookeeperHosts", "127.0.0.1");
+                  }
+                  log.info("Zookeeper hosts set to " + hosts);
+  
+                  curator = CuratorFrameworkFactory.builder()
+                      .connectString(hosts)
+                      .namespace(conf.getString("rootPath", "io.vertx"))
+                      .sessionTimeoutMs(conf.getInteger("sessionTimeout", 20000))
+                      .connectionTimeoutMs(conf.getInteger("connectTimeout", 3000))
+                      .retryPolicy(retryPolicy).build();
+              }
+              curator.start();
+              while (curator.getState() != CuratorFrameworkState.STARTED) {
+                  try {
+                      Thread.sleep(100);
+                  } catch (InterruptedException e) {
+                      if (curator.getState() != CuratorFrameworkState.STARTED) {
+                          future.fail("zookeeper client being interrupted while starting.");
+                      }
+                  }
+              }
+              nodeID = UUID.randomUUID().toString();
+              try {
+                  addLocalNodeID();
+                  future.complete();
+              } catch (Exception e) {
+                  future.fail(e);
+              }
+          }
+      }, resultHandler);
+  }
+  ```
+
+### ClusteredEventBus的启动
+
+先来看start方法，该方法的核心调用链是getAsyncMultiMap->getServerHandler->deliverMessageLocally
+
+```java
+// 暂且忽略HA，首先获取集群中所有节点的map，再创建server进行监听。监听结果由getServerHandler产生的方法进行处理。
+@Override
+public void start(Handler<AsyncResult<Void>> resultHandler) {
+    // Get the HA manager, it has been constructed but it's not yet initialized
+    HAManager haManager = vertx.haManager();
+    setClusterViewChangedHandler(haManager);
+    clusterManager.<String, ClusterNodeInfo>getAsyncMultiMap(SUBS_MAP_NAME, ar1 -> {
+        if (ar1.succeeded()) {
+            subs = ar1.result();
+            server = vertx.createNetServer(getServerOptions());
+
+            server.connectHandler(getServerHandler());
+            server.listen(asyncResult -> {
+                if (asyncResult.succeeded()) {
+                    int serverPort = getClusterPublicPort(options, server.actualPort());
+                    String serverHost = getClusterPublicHost(options);
+                    serverID = new ServerID(serverPort, serverHost);
+                    nodeInfo = new ClusterNodeInfo(clusterManager.getNodeID(), serverID);
+                    vertx.executeBlocking(fut -> {
+                        haManager.addDataToAHAInfo(SERVER_ID_HA_KEY, new JsonObject().put("host", serverID.host).put("port", serverID.port));
+                        fut.complete();
+                    }, false, ar2 -> {
+                        if (ar2.succeeded()) {
+                            started = true;
+                            resultHandler.handle(Future.succeededFuture());
+                        } else {
+                            resultHandler.handle(Future.failedFuture(ar2.cause()));
+                        }
+                    });
+                } else {
+                    resultHandler.handle(Future.failedFuture(asyncResult.cause()));
+                }
+            });
+        } else {
+            resultHandler.handle(Future.failedFuture(ar1.cause()));
+        }
+    });
+}
+```
+
+> 小知识：再集群模式下，每个EventBus上注册的handler都由一个ID，集群中维护它们的方式将handler-ID和server-ID存成一个map，以便在消息发送时根据handler-id找到对应的server，再在server上去执行该handler。
+>
+> 上面的getAsyncMultiMap(SUBS_MAP_NAME...就是将这个map从集群中拿下来。然后维护在本地。
+>
+> 问：那如何通知其它节点我刚注册了一个handler呢？
+>
+> 答：getAsyncMultiMap(SUBS_MAP_NAME...获取到的是AsyncMultiMap的子类实现，本身就是一个集群级别的Map。它的实现由具体集群管理库做，不用我们操心。
+
+来看getServerHandler：它将接收到的信息解析，然后调用deliverMessageLocally进行处理。deliverMessageLocally的逻辑上面已经分析过。这里不再赘述。
+
+```java
+private Handler<NetSocket> getServerHandler() {
+    return socket -> {
+        RecordParser parser = RecordParser.newFixed(4);
+        Handler<Buffer> handler = new Handler<Buffer>() {
+            int size = -1;
+
+            public void handle(Buffer buff) {
+                if (size == -1) {
+                    size = buff.getInt(0);
+                    parser.fixedSizeMode(size);
+                } else {
+                    ClusteredMessage received = new ClusteredMessage();
+                    received.readFromWire(buff, codecManager);
+                    if (metrics != null) {
+                        metrics.messageRead(received.address(), buff.length());
+                    }
+                    parser.fixedSizeMode(4);
+                    size = -1;
+                    if (received.codec() == CodecManager.PING_MESSAGE_CODEC) {
+                        // Just send back pong directly on connection
+                        socket.write(PONG);
+                    } else {
+                        deliverMessageLocally(received);
+                    }
+                }
+            }
+        };
+        parser.setOutput(handler);
+        socket.handler(parser);
+    };
+}
+```
+
+至此，我们看到了集群模式的Vertx是如何启动的。以及是如何接收信息的。
+
+接下来，我们来看handler的注册和消息的发送。
+
+### vertx.eventBus().consumer
+
+最终可以追踪到这个地址：io.vertx.core.eventbus.impl.clustered.ClusteredEventBus#addRegistration。它只是将其添加到了subs中。
+
+注意前面说过，subs仅仅是维护handler地址到服务节点的映射，其实真正的处理逻辑还是在对应节点本地。处理完后又执行了一次集群间发送的逻辑。
+
+```java
+@Override
+protected <T> void addRegistration(boolean newAddress, String address,
+                                   boolean replyHandler, boolean localOnly,
+                                   Handler<AsyncResult<Void>> completionHandler) {
+    if (newAddress && subs != null && !replyHandler && !localOnly) {
+        // Propagate the information
+        subs.add(address, nodeInfo, completionHandler);
+        ownSubs.add(address);
+    } else {
+        completionHandler.handle(Future.succeededFuture());
+    }
+}
+```
+
+### vertx.eventBus().send
+
+最终追踪到如下地址：io.vertx.core.eventbus.impl.clustered.ClusteredEventBus#sendOrPub。
+
+```java
+// 它从subs这个map中获取对应节点信息。在onSubsReceived()中处理
+@Override
+protected <T> void sendOrPub(OutboundDeliveryContext<T> sendContext) {
+    if (sendContext.options.isLocalOnly()) {
+        if (metrics != null) {
+            metrics.messageSent(sendContext.message.address(), !sendContext.message.isSend(), true, false);
+        }
+        deliverMessageLocally(sendContext);
+    } else if (Vertx.currentContext() == null) {
+        // Guarantees the order when there is no current context
+        sendNoContext.runOnContext(v -> {
+            // 这是重点
+            subs.get(sendContext.message.address(), ar -> onSubsReceived(ar, sendContext));
+        });
+    } else {
+        subs.get(sendContext.message.address(), ar -> onSubsReceived(ar, sendContext));
+    }
+}
+```
+
+看如何处理
+
+```java
+// 根据地址获取到一个ChoosableIterable，即一个handler可能对应多个节点(高可用配置)。
+private <T> void onSubsReceived(AsyncResult<ChoosableIterable<ClusterNodeInfo>> asyncResult, OutboundDeliveryContext<T> sendContext) {
+    if (asyncResult.succeeded()) {
+        ChoosableIterable<ClusterNodeInfo> serverIDs = asyncResult.result();
+        if (serverIDs != null && !serverIDs.isEmpty()) {
+            sendToSubs(serverIDs, sendContext);
+        } else {
+            if (metrics != null) {
+                metrics.messageSent(sendContext.message.address(), !sendContext.message.isSend(), true, false);
+            }
+            deliverMessageLocally(sendContext);
+        }
+    } else {
+        log.error("Failed to send message", asyncResult.cause());
+        Handler<AsyncResult<Void>> handler = sendContext.message.writeHandler();
+        if (handler != null) {
+            handler.handle(asyncResult.mapEmpty());
+        }
+    }
+}
+```
+
+在来到这里
+
+```java
+// 从众多节点中选择一个，sendRemote
+private <T> void sendToSubs(ChoosableIterable<ClusterNodeInfo> subs, OutboundDeliveryContext<T> sendContext) {
+    String address = sendContext.message.address();
+    if (sendContext.message.isSend()) {
+        // Choose one
+        ClusterNodeInfo ci = subs.choose();
+        ServerID sid = ci == null ? null : ci.serverID;
+        if (sid != null && !sid.equals(serverID)) {  //We don't send to this node
+            if (metrics != null) {
+                metrics.messageSent(address, false, false, true);
+            }
+            sendRemote(sid, sendContext.message);
+        } else {
+            if (metrics != null) {
+                metrics.messageSent(address, false, true, false);
+            }
+            deliverMessageLocally(sendContext);
+        }
+    } else {
+        // Publish
+        boolean local = false;
+        boolean remote = false;
+        for (ClusterNodeInfo ci : subs) {
+            if (!ci.serverID.equals(serverID)) {  //We don't send to this node
+                remote = true;
+                sendRemote(ci.serverID, sendContext.message);
+            } else {
+                local = true;
+            }
+        }
+        if (metrics != null) {
+            metrics.messageSent(address, true, local, remote);
+        }
+        if (local) {
+            deliverMessageLocally(sendContext);
+        }
+    }
+}
+```
+
+来到这里：得到对应节点的连接，然后通过TCP发送出去。
+
+```java
+private void sendRemote(ServerID theServerID, MessageImpl message) {
+    // We need to deal with the fact that connecting can take some time and is async, and we cannot
+    // block to wait for it. So we add any sends to a pending list if not connected yet.
+    // Once we connect we send them.
+    // This can also be invoked concurrently from different threads, so it gets a little
+    // tricky
+    ConnectionHolder holder = connections.get(theServerID);
+    if (holder == null) {
+        // When process is creating a lot of connections this can take some time
+        // so increase the timeout
+        holder = new ConnectionHolder(this, theServerID, options);
+        ConnectionHolder prevHolder = connections.putIfAbsent(theServerID, holder);
+        if (prevHolder != null) {
+            // Another one sneaked in
+            holder = prevHolder;
+        } else {
+            holder.connect();
+        }
+    }
+    holder.writeMessage((ClusteredMessage) message);
+}
+```
+
+### 康康ClusteredEventBus#sendReply
+
+最终来到这里，可以看到由于在响应Message中直接记录了发送过来的节点ID，因此可以通过该节点ID，可以直接调用sendRemote发送。
+
+```java
+@Override
+protected <T> void sendReply(OutboundDeliveryContext<T> sendContext, MessageImpl replierMessage) {
+    clusteredSendReply(((ClusteredMessage) replierMessage).getSender(), sendContext);
+}
+
+private <T> void clusteredSendReply(ServerID replyDest, OutboundDeliveryContext<T> sendContext) {
+    MessageImpl message = sendContext.message;
+    String address = message.address();
+    if (!replyDest.equals(serverID)) {
+        if (metrics != null) {
+            metrics.messageSent(address, false, false, true);
+        }
+        sendRemote(replyDest, message);
+    } else {
+        if (metrics != null) {
+            metrics.messageSent(address, false, true, false);
+        }
+        deliverMessageLocally(sendContext);
+    }
+}
+```
+
+总结：通过上面系列源码分析，能够看到，集群只是起到了节点管理和注册信息同步的作用，真正的数据发送和处理是各个节点自己通过TCP发送的。
+
+## 高可用工作原理
