@@ -47,47 +47,49 @@ VertxThread -
 创建VertxImpl时干了什么？
 
 ```java
-// 创建closeHooks，CloseHooks维护了一个Closeable的Set，可向其中添加、移除任务，还有执行所有钩子的run方法啦。
-closeHooks = new CloseHooks(log);
-// 创建线程阻塞检查器，它启动一个名为vertx-blocked-thread-checker的定时器，
-checker = new BlockedThreadChecker(options.getBlockedThreadCheckInterval(), options.getBlockedThreadCheckIntervalUnit(), options.getWarningExceptionTime(), options.getWarningExceptionTimeUnit());
-// 指定一个EventLoop最长可以连续执行多久
-maxEventLoopExTime = options.getMaxEventLoopExecuteTime();
-maxEventLoopExecTimeUnit = options.getMaxEventLoopExecuteTimeUnit();
-// 创建EventLoop线程工厂，主要用于指定线程名称和线程阻塞检测器
-eventLoopThreadFactory = new VertxThreadFactory("vert.x-eventloop-thread-", checker, false, maxEventLoopExTime, maxEventLoopExecTimeUnit);
-// 创建EventLoopGroup，它又实际创建了NioEventLoopGroup，它是Netty的组件。一个EventLoopGroup，就是一个EventLoop组。在Netty中，一个EventLoop是线程和IO的结合，一个EventLoop始终绑定在同一个线程上。
-eventLoopGroup = transport.eventLoopGroup(Transport.IO_EVENT_LOOP_GROUP, options.getEventLoopPoolSize(), eventLoopThreadFactory, NETTY_IO_RATIO);
-// 创建一个acceptor EventLoopGroup，创建方式和上面类似。
-ThreadFactory acceptorEventLoopThreadFactory = new VertxThreadFactory("vert.x-acceptor-thread-", checker, false, options.getMaxEventLoopExecuteTime(), options.getMaxEventLoopExecuteTimeUnit());
-acceptorEventLoopGroup = transport.eventLoopGroup(Transport.ACCEPTOR_EVENT_LOOP_GROUP, 1, acceptorEventLoopThreadFactory, 100);
-// 创建worker线程池
-ExecutorService workerExec = new ThreadPoolExecutor(workerPoolSize, workerPoolSize,
-      0L, TimeUnit.MILLISECONDS, new LinkedTransferQueue<>(),
-      new VertxThreadFactory("vert.x-worker-thread-", checker, true, options.getMaxWorkerExecuteTime(), options.getMaxWorkerExecuteTimeUnit()));
-PoolMetrics workerPoolMetrics = metrics != null ? metrics.createPoolMetrics("worker", "vert.x-worker-thread", 	options.getWorkerPoolSize()) : null;
-workerPool = new WorkerPool(workerExec, workerPoolMetrics);
-// 创建inertnal阻塞线程池
-ExecutorService internalBlockingExec = Executors.newFixedThreadPool(options.getInternalBlockingPoolSize(),
-        new VertxThreadFactory("vert.x-internal-blocking-", checker, true, options.getMaxWorkerExecuteTime(), options.getMaxWorkerExecuteTimeUnit()));
-internalBlockingPool = new WorkerPool(internalBlockingExec, internalBlockingPoolMetrics);
-// 创建文件解析器，在FileSystem中有使用，进行文件操作时使用的是java nio
-this.fileResolver = new FileResolver(options.getFileSystemOptions());
-// 创建地址解析器，推测在DNS解析时会用到
-this.addressResolver = new AddressResolver(this, options.getAddressResolverOptions());
-// 创建发布管理器，用于发布Verticle
-this.deploymentManager = new DeploymentManager(this);
-if (options.getEventBusOptions().isClustered()) {
-    // 创建集群管理器和集群的EventBus
-    this.clusterManager = getClusterManager(options);
-    this.eventBus = new ClusteredEventBus(this, options, clusterManager);
-} else {
-    // 创建本地EventBus
-    this.clusterManager = null;
-    this.eventBus = new EventBusImpl(this);
+private VertxImpl(VertxOptions options, Transport transport) {
+    // 创建closeHooks，CloseHooks维护了一个Closeable的Set，可向其中添加、移除任务，还有执行所有钩子的run方法啦。
+    closeHooks = new CloseHooks(log);
+    // 创建线程阻塞检查器，它启动一个名为vertx-blocked-thread-checker的定时器，
+    checker = new BlockedThreadChecker(options.getBlockedThreadCheckInterval(), options.getBlockedThreadCheckIntervalUnit(), options.getWarningExceptionTime(), options.getWarningExceptionTimeUnit());
+    // 指定一个EventLoop最长可以连续执行多久
+    maxEventLoopExTime = options.getMaxEventLoopExecuteTime();
+    maxEventLoopExecTimeUnit = options.getMaxEventLoopExecuteTimeUnit();
+    // 创建EventLoop线程工厂，主要用于指定线程名称和线程阻塞检测器
+    eventLoopThreadFactory = new VertxThreadFactory("vert.x-eventloop-thread-", checker, false, maxEventLoopExTime, maxEventLoopExecTimeUnit);
+    // 创建EventLoopGroup，它又实际创建了NioEventLoopGroup，它是Netty的组件。一个EventLoopGroup，就是一个EventLoop组。在Netty中，一个EventLoop是线程和IO的结合，一个EventLoop始终绑定在同一个线程上。
+    eventLoopGroup = transport.eventLoopGroup(Transport.IO_EVENT_LOOP_GROUP, options.getEventLoopPoolSize(), eventLoopThreadFactory, NETTY_IO_RATIO);
+    // 创建一个acceptor EventLoopGroup，创建方式和上面类似。
+    ThreadFactory acceptorEventLoopThreadFactory = new VertxThreadFactory("vert.x-acceptor-thread-", checker, false, options.getMaxEventLoopExecuteTime(), options.getMaxEventLoopExecuteTimeUnit());
+    acceptorEventLoopGroup = transport.eventLoopGroup(Transport.ACCEPTOR_EVENT_LOOP_GROUP, 1, acceptorEventLoopThreadFactory, 100);
+    // 创建worker线程池
+    ExecutorService workerExec = new ThreadPoolExecutor(workerPoolSize, workerPoolSize,
+                                                        0L, TimeUnit.MILLISECONDS, new LinkedTransferQueue<>(),
+                                                        new VertxThreadFactory("vert.x-worker-thread-", checker, true, options.getMaxWorkerExecuteTime(), options.getMaxWorkerExecuteTimeUnit()));
+    PoolMetrics workerPoolMetrics = metrics != null ? metrics.createPoolMetrics("worker", "vert.x-worker-thread", 	options.getWorkerPoolSize()) : null;
+    workerPool = new WorkerPool(workerExec, workerPoolMetrics);
+    // 创建inertnal阻塞线程池
+    ExecutorService internalBlockingExec = Executors.newFixedThreadPool(options.getInternalBlockingPoolSize(),
+                                                                        new VertxThreadFactory("vert.x-internal-blocking-", checker, true, options.getMaxWorkerExecuteTime(), options.getMaxWorkerExecuteTimeUnit()));
+    internalBlockingPool = new WorkerPool(internalBlockingExec, internalBlockingPoolMetrics);
+    // 创建文件解析器，在FileSystem中有使用，进行文件操作时使用的是java nio
+    this.fileResolver = new FileResolver(options.getFileSystemOptions());
+    // 创建地址解析器，推测在DNS解析时会用到
+    this.addressResolver = new AddressResolver(this, options.getAddressResolverOptions());
+    // 创建发布管理器，用于发布Verticle
+    this.deploymentManager = new DeploymentManager(this);
+    if (options.getEventBusOptions().isClustered()) {
+        // 创建集群管理器和集群的EventBus
+        this.clusterManager = getClusterManager(options);
+        this.eventBus = new ClusteredEventBus(this, options, clusterManager);
+    } else {
+        // 创建本地EventBus
+        this.clusterManager = null;
+        this.eventBus = new EventBusImpl(this);
+    }
+    // 创建sharedData，允许你在整个应用中共享你的数据，包括集群范围内
+    this.sharedData = new SharedDataImpl(this, clusterManager);
 }
-// 创建sharedData，允许你在整个应用中共享你的数据，包括集群范围内
-this.sharedData = new SharedDataImpl(this, clusterManager);
 ```
 
 
