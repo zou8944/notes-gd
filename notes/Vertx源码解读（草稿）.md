@@ -1217,3 +1217,419 @@ private <T> void clusteredSendReply(ServerID replyDest, OutboundDeliveryContext<
 总结：通过上面系列源码分析，能够看到，集群只是起到了节点管理和注册信息同步的作用，真正的数据发送和处理是各个节点自己通过TCP发送的。
 
 ## 高可用工作原理
+
+
+
+
+
+## Web工作原理
+
+### Router
+
+#### Router
+
+首先是Router接口，它主要有以下几个方面组成。
+
+- Router.router(vertx) 创建一个Router对象
+
+- routeXXX() 各种路由方法，可以根据路径、方法、媒体类型、正则表达式等各种方式路由，返回一个Route对象，用于指定处理器。
+
+- getRoutes() 获取所有route
+
+- clear() 清除所有Route
+
+- mountSubRouter() 挂载子router
+
+- exceptionHandler() 指定一个router级别的异常处理器，当handler中抛出异常时，它会捕获。但它不会影响正常业务逻辑。
+
+  但它目前已被废弃，应该使用errorHandler()，它对应的是500的错误
+
+- errorHandler(code, handler)  当发生特定错误码时会调用它。当RoutingContext失败(fail) 或 一些handler失败但没有写响应 或 handler中抛出了异常，都会调用它。需要注意的是它的500有特殊的意义，代表通用错误。
+
+- handleContext(context) 将一个RoutingContext传进来，当一个Router被挂载到某个route时会用：将该route的RoutingContext传入本router进行处理。
+
+- handleFailure(RoutingContext) 使用场景同上，处理失败
+
+- modifiedHandler(handler) 当本Router的Route发生变化时该方法会被触发。
+
+首先说，Router只是Handler的子类，因此本质上还只是一个处理器，并不是什么主动角色。
+
+#### RouterImpl
+
+众多route生成方法的实现都大同小异，都是创建RouteImpl
+
+```kotlin
+public synchronized Route route(String path) {
+  state = state.incrementOrderSequence();
+  return new RouteImpl(this, state.getOrderSequence(), path);
+}
+```
+
+另外一个重点是handle，既然Router是Handler的子类，因此本类最初被调用的一定是handle方法（**在请求进来时调用**）
+
+```kotlin
+@Override
+public void handle(HttpServerRequest request) {
+    new RoutingContextImpl(null, this, request, state.getRoutes()).next();
+}
+```
+
+啥也没干，就创建了一个RoutingContextImpl，并调用了next()，开启处理逻辑。
+
+#### RouterState
+
+一个RouterImpl包含一个RouterState，在初始化时就创建了
+
+```kotlin
+public RouterImpl(Vertx vertx) {
+    this.vertx = vertx;
+    this.state = new RouterState(this);
+}
+```
+
+用户管理Router的状态，共有如下几种状态
+
+- 包含的Route集合
+- 顺序记录器
+- errorHandler映射
+- modifiedHandler
+
+```kotlin
+private final Set<RouteImpl> routes;
+private final int orderSequence;
+private final Map<Integer, Handler<RoutingContext>> errorHandlers;
+private final Handler<Router> modifiedHandler;
+```
+
+### Route
+
+#### Route
+
+一个接口，对路由信息的描述，包含如下几种信息
+
+- method
+- path
+- regex
+- consumes
+- produces
+
+同时包含了对匹配到的请求的处理方式
+
+- handler	常规处理
+- failureHandler  失败了怎么处理
+- blockingHandler  常规处理（包含阻塞操作）
+- subRouter  给子router处理
+
+#### RouteImpl
+
+没什么好说的，就是对上面的实现
+
+#### RouteState
+
+是对一个路由状态的持有，相对RouterState而言，它持有的状态复杂得多。
+
+```kotlin
+// 路径
+private final String path;
+// 顺序
+private final int order;
+// 是否开启
+private final boolean enabled;
+// 方法
+private final Set<HttpMethod> methods;
+// 消费的多媒体类型
+private final Set<MIMEHeader> consumes;
+// 是否允许body为空
+private final boolean emptyBodyPermittedWithConsumes;
+// 产生的多媒体类型
+private final Set<MIMEHeader> produces;
+// 常规处理器集合
+private final List<Handler<RoutingContext>> contextHandlers;
+// 失败处理器集合
+private final List<Handler<RoutingContext>> failureHandlers;
+// 不知道干嘛的
+private final boolean added;
+// 用于匹配的正则
+private final Pattern pattern;
+// 也属于正则表达式的一部分
+private final List<String> groups;
+// 是否使用归一化路径
+private final boolean useNormalisedPath;
+// 还是正则表达式
+private final Set<String> namedGroupsInRegex;
+// 主机匹配
+private final Pattern virtualHostPattern;
+// 路径是否以斜杠结尾
+private final boolean pathEndsWithSlash;
+// 是否被排除
+private final boolean exclusive;
+// 是否精确匹配
+private final boolean exactPath;
+```
+
+对Route最重要的方法当然是判断是否匹配，该方法也是在RouteState中给出
+
+io.vertx.ext.web.impl.RouteState#matches
+
+逻辑比较复杂，有兴趣可以去看看
+
+### RoutingContext
+
+#### RoutingContext
+
+
+
+#### RoutingContextImpl
+
+这里重点关注RoutingContextImpl的创建和next()方法。
+
+```kotlin
+public RoutingContextImpl(String mountPoint, RouterImpl router, HttpServerRequest request, Set<RouteImpl> routes) {
+    super(mountPoint, request, routes);
+    this.router = router;
+    this.fillParsedHeaders(request);
+    if (request.path().length() == 0) {
+        this.fail(400);
+    } else if (request.path().charAt(0) != '/') {
+        this.fail(404);
+    }
+
+}
+
+RoutingContextImplBase(String mountPoint, HttpServerRequest request, Set<RouteImpl> routes) {
+    this.mountPoint = mountPoint;
+    this.request = new HttpServerRequestWrapper(request);
+    this.routes = routes;
+    this.iter = routes.iterator();
+    this.currentRouteNextHandlerIndex = new AtomicInteger(0);
+    this.currentRouteNextFailureHandlerIndex = new AtomicInteger(0);
+    this.resetMatchFailure();
+}
+
+public void next() {
+    if (!this.iterateNext()) {
+        this.checkHandleNoMatch();
+    }
+}
+```
+
+我们来仔细看iterateNext()
+
+```kotlin
+boolean iterateNext() {
+    boolean failed = this.failed();
+    // 在route的第二个handler调用next时，走的是这段逻辑。
+    if (this.currentRoute != null) {
+        try {
+            if (!failed && this.currentRoute.hasNextContextHandler(this)) {
+                this.currentRouteNextHandlerIndex.incrementAndGet();
+                this.resetMatchFailure();
+                this.currentRoute.handleContext(this);
+                return true;
+            }
+
+            if (failed && this.currentRoute.hasNextFailureHandler(this)) {
+                this.currentRouteNextFailureHandlerIndex.incrementAndGet();
+                this.currentRoute.handleFailure(this);
+                return true;
+            }
+        } catch (Throwable var5) {
+            this.handleInHandlerRuntimeFailure(this.currentRoute.getRouter(), failed, var5);
+            return true;
+        }
+    }
+
+    // 死循环迭代所有route
+    while(true) {
+        // this.iter是Router.getRoutes().iterator()得到的，即迭代所有routes
+        if (this.iter.hasNext()) {
+            // RouteState包含了所有Route的状态和内容，因此要操作Route就一定要获取它啦
+            RouteState routeState = ((RouteImpl)this.iter.next()).state();
+            this.currentRouteNextHandlerIndex.set(0);
+            this.currentRouteNextFailureHandlerIndex.set(0);
+
+            try {
+                // 匹配结果是0或4开头的状态码，如果是0则表示成功。这意味着每个route都会匹配一次，也一定会有一个结果。
+                int matchResult = routeState.matches(this, this.mountPoint(), failed);
+                // 匹配失败的情况
+                if (matchResult != 0) {
+                    if (matchResult == 405) {
+                        if (this.matchFailure == 404) {
+                            this.matchFailure = matchResult;
+                        }
+                    } else if (matchResult != 404) {
+                        this.matchFailure = matchResult;
+                    }
+                    continue;
+                }
+
+                // 匹配成功的情况
+                this.resetMatchFailure();
+
+                try {
+                    this.currentRoute = routeState;、
+
+                    if (failed && this.currentRoute.hasNextFailureHandler(this)) {
+	                    // 如果有失败，则调用route原先保存的failureHandler
+                        this.currentRouteNextFailureHandlerIndex.incrementAndGet();
+                        routeState.handleFailure(this);
+                    } else {
+                        // 如果成功，则调用route原先保存的contextHandler
+                        if (!this.currentRoute.hasNextContextHandler(this)) {
+                            continue;
+                        }
+
+                        this.currentRouteNextHandlerIndex.incrementAndGet();
+                        routeState.handleContext(this);
+                    }
+                } catch (Throwable var6) {
+                    this.handleInHandlerRuntimeFailure(routeState.getRouter(), failed, var6);
+                }
+
+                return true;
+            } catch (Throwable var7) {
+                if (LOG.isTraceEnabled()) {
+                    LOG.trace("IllegalArgumentException thrown during iteration", var7);
+                }
+
+                if (!this.response().ended()) {
+                    this.unhandledFailure(var7 instanceof IllegalArgumentException ? 400 : -1, var7, routeState.getRouter());
+                }
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+```
+
+再来仔细看
+
+```kotlin
+private void checkHandleNoMatch() {
+    if (this.failed()) {
+	    // 如果失败了，则按照未处理的异常处理，即从router的errorHandler中获取对应code的handler并给出结果
+        this.unhandledFailure(this.statusCode, this.failure, this.router);
+    } else {
+        // 没有失败时也获取以下，有说明是预期的失败，还是要处理。
+        Handler<RoutingContext> handler = this.router.getErrorHandlerByStatusCode(this.matchFailure);
+        this.statusCode = this.matchFailure;
+        if (handler == null) {
+            this.response().setStatusCode(this.matchFailure);
+            // 404的情况
+            if (this.request().method() != HttpMethod.HEAD && this.matchFailure == 404) {
+                this.response().putHeader(HttpHeaderNames.CONTENT_TYPE, "text/html; charset=utf-8").end("<html><body><h1>Resource not found</h1></body></html>");
+            } else {
+                // 常规情况，直接结束
+                this.response().end();
+            }
+        } else {
+            handler.handle(this);
+        }
+    }
+
+}
+```
+
+好了，到现在，我们知道**整个RoutingContext的执行起始是Router的handle方法：它创建RoutingContextImpl对象，并调用next()启动route的匹配操作，并在匹配后调用对应route的正常handler链或失败handler链。**
+
+这里掌握三个关键点
+
+- **RoutingContext对象是在Router的handle中创建的，并在匹配到的route的handler中流转。**
+- **遍历所有route的过程会在每次请求进来被处理。逻辑在iterateNext()方法的下半部分。**
+- **route的handler链调用比较特殊，需要开发者手动调用RoutingContext的next()方法处理。逻辑在iterateNext()方法的上半部分。**
+- **在从Router的handle开始，都是在当前线程不阻塞地执行，可以一镜到底。**
+
+
+
+接下来探索是谁调用了Router的handle呢？
+
+
+
+
+
+
+
+### 积累的疑问
+
+- ```kotlin
+  // 这种是如何保证错误能够在failureHandler中被处理到的
+  router.get("/hello")
+      .handler { ctx ->
+        1 / 0
+        ctx.next()
+      }
+      .failureHandler { ctx ->
+        ctx.request().response().end("失败了")
+      }
+  // 这种呢？
+  router.get("/hello")
+      .handler { ctx ->
+        vertx.executeBlocking<String>({ promise ->
+          1 / 0
+          promise.complete()
+        }, { ar ->
+          ctx.next()
+        })
+      }
+      .failureHandler { ctx ->
+        ctx.request().response().end("失败了")
+      }
+  ```
+
+  在handler中抛出的一场为什么能够在failureHandler中接收到
+
+  解答：
+  
+  第一个问题，在iterateNext()方法的上半部分中，会捕获handler中抛出的异常，步骤如下。
+  
+  ```kotlin
+  private void handleInHandlerRuntimeFailure(RouterImpl router, boolean failed, Throwable t) {
+      if (LOG.isTraceEnabled()) {
+          LOG.trace("Throwable thrown from handler", t);
+      }
+  
+      if (!failed) {
+          if (LOG.isTraceEnabled()) {
+              LOG.trace("Failing the routing");
+          }
+  		// 关键在这里，将fail标记
+          this.fail(t);
+      } else {
+          if (LOG.isTraceEnabled()) {
+              LOG.trace("Failure in handling failure");
+          }
+  
+          this.unhandledFailure(-1, t, router);
+      }
+  }
+  
+  public void fail(Throwable t) {
+      this.fail(-1, t);
+  }
+  
+  public void fail(int statusCode, Throwable throwable) {
+      this.statusCode = statusCode;
+      this.failure = (Throwable)(throwable == null ? new NullPointerException() : throwable);
+      this.doFail();
+  }
+  
+  private void doFail() {
+      this.iter = this.router.iterator();
+      this.currentRoute = null;
+      this.next();
+  }
+  ```
+  
+  可以看到，依次调用了fail，将fail标记为true，并调用next触发下一次操作。再次回到iterateNext()上半部分的逻辑。这次fail为true，就会走failureHandler的逻辑。
+  
+- 是如何保证所有handler都在EventLoop线程中执行的？
+
+- 对一个Route的错误处理有哪几种，对一个Router呢？
+
+  - Route.failureHandler()
+  
+- 
+
