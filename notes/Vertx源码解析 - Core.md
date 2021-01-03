@@ -25,7 +25,7 @@ Vertx是最为核心的类，创建任何Vertx组件几乎都需要Vertx类的�
 
 Vertx是一个接口，VertxImpl是最终实现类，也是唯一的实现类。其中包含了单机和集群两种模式的实现。
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002115219637.png" alt="image-20201002115219637" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002115219637.png" alt="image-20201002115219637" style="zoom:150%;" />
 
 ```java
 // 单机实现，创建返回VertxImpl即可
@@ -54,7 +54,7 @@ static void clusteredVertx(VertxOptions options, Transport transport, Handler<As
 - 发布Verticle
 - 执行阻塞方法
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002162735465.png" alt="image-20201002162735465" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002162735465.png" alt="image-20201002162735465" style="zoom:150%;" />
 
 如上，Vertx类几乎撑起了所有部分。接着我们看它是如何做到的。
 
@@ -110,7 +110,7 @@ private VertxImpl(VertxOptions options, Transport transport) {
 
 上面太复杂，整理成思维导图会好看很多。
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002164249378.png" alt="image-20201002164249378" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002164249378.png" alt="image-20201002164249378" style="zoom:150%;" />
 
 EventBus用于进行消息传输；
 
@@ -136,11 +136,11 @@ DeploymentManager和VerticleManager用于发布Verticle，保证Verticle的特�
 
 EventBus的继承关系也很简单，其单机版实现类为EventBusImpl，ClusteredEventBus继承自它，除了服务监听和远程调用，均使用了EventBusImpl中的方法。
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002165242516.png" alt="image-20201002165242516" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002165242516.png" alt="image-20201002165242516" style="zoom:150%;" />
 
 EventBus的能力，以及EventBusImpl持有对象如下：
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002170731703.png" alt="image-20201002170731703" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002170731703.png" alt="image-20201002170731703" style="zoom:150%;" />
 
 出入拦截器自不必说，每次消息进来和出去都会先被拦截器处理；
 
@@ -171,17 +171,17 @@ Vertx中并没有EventLoop这个类，它是Netty中的类。对Vertx的源码�
 
 Context是真正提交任务的地方，凡Vertx中涉及到任务的执行，总是少不了Context的身影。
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002172947148.png" alt="image-20201002172947148" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002172947148.png" alt="image-20201002172947148" style="zoom:150%;" />
 
 其核心能力主要在协调代码的运行，同时也可存储数据。其大部分逻辑都在ContextImpl中。其两个子类，仅在自我裁定、任务提交、上下文复制上有所不同。
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002174403741.png" alt="image-20201002174403741" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002174403741.png" alt="image-20201002174403741" style="zoom:150%;" />
 
 ### Verticle
 
 Verticle放在这里有一点另类，因为它并非核心组件。只是Vertx提供的actor模式实现的一个发布单元。它的actor特性由VerticleManager、EventBus、Context等一起保证。就其能力来说，也只有启动和停止两个方法。
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002175612694.png" alt="image-20201002175612694" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002175612694.png" alt="image-20201002175612694" style="zoom:150%;" />
 
 ## 从EventBus看Vertx工作原理
 
@@ -467,7 +467,7 @@ fun main() {
 
 其中可能需要解释的点是getVerticles()，这意味着一个Deployment可以有多个Verticle吗？一定程度上是，但仅当一个Verticle需要发布多个实例时，才会存在多个Verticle对象。
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002204437752.png" alt="image-20201002204437752" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002204437752.png" alt="image-20201002204437752" style="zoom:150%;" />
 
 其中需要重点关注的方法是`io.vertx.core.impl.DeploymentManager.DeploymentImpl#doUndeploy`和`io.vertx.core.impl.DeploymentManager.DeploymentImpl#doUndeployChildren`，两个方法递归调用，完成了指定Verticle及其子Verticle的取消。
 
@@ -559,7 +559,7 @@ private synchronized Future<Void> doUndeployChildren(ContextInternal undeploying
 
 DeploymentManager专门用于Verticle发布。
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002204929170.png" alt="image-20201002204929170" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002204929170.png" alt="image-20201002204929170" style="zoom:150%;" />
 
 重点方法在如下几个
 
@@ -675,7 +675,7 @@ Deployment.undeploy()在上面介绍Deployment时已介绍。
 
 DeploymentManager专注于发布，VerticleManager则主要专注于Verticle的创建。其内部持有一个DeploymentManager对象，用于执行实际的发布操作。
 
-<img src="/home/floyd/PersonalCode/notes-gd/notes/Vertx源码解析 - Core/image-20201002212707514.png" alt="image-20201002212707514" style="zoom:150%;" />
+<img src="https://gdz.oss-cn-shenzhen.aliyuncs.com/vertx-code-analyse/image-20201002212707514.png" alt="image-20201002212707514" style="zoom:150%;" />
 
 该类中有两个主要逻辑
 
